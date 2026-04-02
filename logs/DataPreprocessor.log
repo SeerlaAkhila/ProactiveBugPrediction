@@ -1,0 +1,27 @@
+[2026-03-26 09:59:25] INFO -   Class distribution - Clean: 791, Buggy: 206
+[2026-03-26 09:59:25] INFO -   Training: 797 samples
+[2026-03-26 09:59:25] INFO -   Testing: 200 samples
+[2026-03-26 09:59:55] INFO - [OK] Dataset loaded: 997 samples, 5 features
+[2026-03-26 09:59:55] INFO - [OK] Data validation passed
+[2026-03-26 09:59:55] INFO - [OK] Features prepared: (997, 4)
+[2026-03-26 09:59:55] INFO -   Class distribution - Clean: 791, Buggy: 206
+[2026-03-26 09:59:55] INFO - [OK] Train-test split completed:
+[2026-03-26 09:59:55] INFO -   Training: 797 samples
+[2026-03-26 09:59:55] INFO -   Testing: 200 samples
+[2026-03-26 09:59:55] INFO - [OK] Feature scaling completed
+[2026-03-26 10:00:12] INFO - [OK] Dataset loaded: 997 samples, 5 features
+[2026-03-26 10:00:12] INFO - [OK] Data validation passed
+[2026-03-26 10:00:12] INFO - [OK] Features prepared: (997, 4)
+[2026-03-26 10:00:12] INFO -   Class distribution - Clean: 791, Buggy: 206
+[2026-03-26 10:00:12] INFO - [OK] Train-test split completed:
+[2026-03-26 10:00:12] INFO -   Training: 797 samples
+[2026-03-26 10:00:12] INFO -   Testing: 200 samples
+[2026-03-26 10:00:12] INFO - [OK] Feature scaling completed
+[2026-03-26 10:04:23] INFO - [OK] Dataset loaded: 997 samples, 5 features
+[2026-03-26 10:04:23] INFO - [OK] Data validation passed
+[2026-03-26 10:04:23] INFO - [OK] Features prepared: (997, 4)
+[2026-03-26 10:04:23] INFO -   Class distribution - Clean: 791, Buggy: 206
+[2026-03-26 10:04:23] INFO - [OK] Train-test split completed:
+[2026-03-26 10:04:23] INFO -   Training: 797 samples
+[2026-03-26 10:04:23] INFO -   Testing: 200 samples
+[2026-03-26 10:04:23] INFO - [OK] Feature scaling completed

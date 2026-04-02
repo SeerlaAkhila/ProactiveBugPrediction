@@ -1,0 +1,78 @@
+[
+  {
+    "accuracy": 0.845,
+    "precision": 0.6923076923076923,
+    "recall": 0.43902439024390244,
+    "f1": 0.5373134328358209,
+    "cm": [
+      [
+        151,
+        8
+      ],
+      [
+        23,
+        18
+      ]
+    ],
+    "auc_roc": 0.7896149716214143,
+    "model_name": "Baseline RF",
+    "model_type": "RandomForest"
+  },
+  {
+    "accuracy": 0.805,
+    "precision": 0.5263157894736842,
+    "recall": 0.4878048780487805,
+    "f1": 0.5063291139240507,
+    "cm": [
+      [
+        141,
+        18
+      ],
+      [
+        21,
+        20
+      ]
+    ],
+    "auc_roc": 0.7670655008436877,
+    "model_name": "Improved RF",
+    "model_type": "RandomForest"
+  },
+  {
+    "accuracy": 0.815,
+    "precision": 0.55,
+    "recall": 0.5365853658536586,
+    "f1": 0.54320987654321,
+    "cm": [
+      [
+        141,
+        18
+      ],
+      [
+        19,
+        22
+      ]
+    ],
+    "auc_roc": 0.7963644730786931,
+    "model_name": "Logistic Regression",
+    "model_type": "Linear"
+  },
+  {
+    "accuracy": 0.855,
+    "precision": 0.7727272727272727,
+    "recall": 0.4146341463414634,
+    "f1": 0.5396825396825397,
+    "cm": [
+      [
+        154,
+        5
+      ],
+      [
+        24,
+        17
+      ]
+    ],
+    "auc_roc": 0.7574014419389478,
+    "model_name": "Naive Bayes",
+    "model_type": "Probabilistic"
+  }
+]

@@ -1,0 +1,50 @@
+{
+  "Baseline RF": {
+    "total_modules": 200,
+    "low_risk": 158,
+    "medium_risk": 29,
+    "high_risk": 13,
+    "low_risk_pct": 79.0,
+    "medium_risk_pct": 14.499999999999998,
+    "high_risk_pct": 6.5,
+    "avg_probability": 0.1849860314685315,
+    "max_probability": 0.98,
+    "min_probability": 0.0
+  },
+  "Improved RF": {
+    "total_modules": 200,
+    "low_risk": 130,
+    "medium_risk": 49,
+    "high_risk": 21,
+    "low_risk_pct": 65.0,
+    "medium_risk_pct": 24.5,
+    "high_risk_pct": 10.5,
+    "avg_probability": 0.2880728478510417,
+    "max_probability": 0.974643860866124,
+    "min_probability": 0.005589058679832698
+  },
+  "Logistic Regression": {
+    "total_modules": 200,
+    "low_risk": 62,
+    "medium_risk": 116,
+    "high_risk": 22,
+    "low_risk_pct": 31.0,
+    "medium_risk_pct": 57.99999999999999,
+    "high_risk_pct": 11.0,
+    "avg_probability": 0.41967197203693957,
+    "max_probability": 0.9999999775005138,
+    "min_probability": 0.261021816898545
+  },
+  "Naive Bayes": {
+    "total_modules": 200,
+    "low_risk": 175,
+    "medium_risk": 3,
+    "high_risk": 22,
+    "low_risk_pct": 87.5,
+    "medium_risk_pct": 1.5,
+    "high_risk_pct": 11.0,
+    "avg_probability": 0.12143918933369498,
+    "max_probability": 1.0,
+    "min_probability": 0.0048652979835537
+  }
+}
