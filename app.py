@@ -25,6 +25,10 @@ import pickle
 import json
 import os
 from pathlib import Path
+try:
+    import shap
+except ImportError:
+    shap = None
 
 # Add src to path
 import sys
@@ -93,6 +97,164 @@ def load_system():
         st.error(f"Error loading system: {e}")
         return None
 
+
+METRIC_ALIASES = {
+    'LOC': ['loc', 'linesofcode', 'numberoflinesofcode', 'number_of_lines_of_code', 'linecount'],
+    'CBO': ['cbo', 'couplingbetweenobjects', 'coupling_between_objects'],
+    'RFC': ['rfc', 'responseforclass', 'response_for_class'],
+    'WMC': ['wmc', 'weightedmethodsperclass', 'weighted_methods_per_class'],
+}
+
+
+def _normalize_name(name):
+    """Normalize column/key names for flexible matching."""
+    return ''.join(ch.lower() for ch in str(name) if ch.isalnum())
+
+
+def extract_metric_columns(df):
+    """
+    Extract required model features from flexible CSV schemas.
+
+    Returns:
+        extracted_df: DataFrame with standard columns LOC, CBO, RFC, WMC
+        mapping: dict showing detected source columns
+        missing: list of still-missing standard columns
+    """
+    normalized_columns = {_normalize_name(col): col for col in df.columns}
+    mapping = {}
+
+    for target_col, aliases in METRIC_ALIASES.items():
+        candidates = [_normalize_name(target_col), *aliases]
+        for candidate in candidates:
+            if candidate in normalized_columns:
+                mapping[target_col] = normalized_columns[candidate]
+                break
+
+    missing = [col for col in METRIC_ALIASES if col not in mapping]
+    if missing:
+        return None, mapping, missing
+
+    extracted_df = pd.DataFrame({
+        target_col: pd.to_numeric(df[source_col], errors='coerce')
+        for target_col, source_col in mapping.items()
+    })
+
+    invalid_cols = [col for col in extracted_df.columns if extracted_df[col].isna().all()]
+    if invalid_cols:
+        return None, mapping, invalid_cols
+
+    return extracted_df, mapping, []
+
+
+def prepare_prediction_input(df):
+    """Prepare uploaded data for prediction with flexible schema handling."""
+    feature_df, mapping, missing = extract_metric_columns(df)
+    if feature_df is None:
+        return None, mapping, missing, None, None
+
+    invalid_rows = feature_df.isna().any(axis=1)
+    valid_rows = ~invalid_rows
+
+    if int(valid_rows.sum()) == 0:
+        return None, mapping, ['No valid numeric rows found for prediction'], None, None
+
+    return (
+        feature_df.reset_index(drop=True),
+        mapping,
+        [],
+        df.reset_index(drop=True).copy(),
+        valid_rows.reset_index(drop=True)
+    )
+
+
+def get_risk_value(metrics, base_name):
+    """Read risk metrics from either legacy or current report schemas."""
+    key_variants = {
+        'low': ['low', 'low_risk'],
+        'medium': ['medium', 'medium_risk'],
+        'high': ['high', 'high_risk'],
+        'low_pct': ['low_pct', 'low_risk_pct'],
+        'medium_pct': ['medium_pct', 'medium_risk_pct'],
+        'high_pct': ['high_pct', 'high_risk_pct'],
+    }
+
+    for key in key_variants.get(base_name, [base_name]):
+        if key in metrics:
+            return metrics[key]
+    return 0
+
+
+def format_pct(value):
+    """Format a score in 0-1 range as a percentage string."""
+    return f"{value * 100:.1f}%"
+
+
+def format_threshold(value):
+    """Format decision threshold values for display."""
+    if value is None or pd.isna(value):
+        return "N/A"
+    return f"{float(value):.3f}"
+
+
+def get_best_model(eval_results, metric_name):
+    """Return the best model name and metrics for a given metric."""
+    best_name = max(eval_results, key=lambda model_name: eval_results[model_name].get(metric_name, 0))
+    return best_name, eval_results[best_name]
+
+
+def get_single_sample_shap(system, model_name, feature_values):
+    """
+    Compute SHAP values for a single module prediction.
+
+    Returns a dict with ranked feature contributions and model output baseline.
+    """
+    if shap is None:
+        return None, "SHAP library is not installed. Install it with `pip install shap`."
+
+    try:
+        model = system.models[model_name]
+        feature_names = system.data.get('feature_names', ['LOC', 'CBO', 'RFC', 'WMC'])
+        input_df = pd.DataFrame([feature_values], columns=feature_names)
+
+        if system.scaler is not None:
+            scaled_values = system.scaler.transform(input_df)
+            model_input = pd.DataFrame(scaled_values, columns=feature_names)
+        else:
+            model_input = input_df.copy()
+
+        explainer = shap.TreeExplainer(model)
+        shap_values = explainer.shap_values(model_input)
+        expected_value = explainer.expected_value
+
+        if isinstance(shap_values, list):
+            contribution_values = shap_values[1][0]
+            base_value = expected_value[1] if isinstance(expected_value, (list, np.ndarray)) else expected_value
+        elif isinstance(shap_values, np.ndarray) and shap_values.ndim == 3:
+            contribution_values = shap_values[0, :, 1]
+            base_value = expected_value[1] if isinstance(expected_value, (list, np.ndarray)) else expected_value
+        elif isinstance(shap_values, np.ndarray):
+            contribution_values = shap_values[0]
+            base_value = expected_value[0] if isinstance(expected_value, (list, np.ndarray)) else expected_value
+        else:
+            return None, "Unable to parse SHAP output for this model."
+
+        explain_df = pd.DataFrame({
+            'feature': feature_names,
+            'input_value': feature_values,
+            'shap_value': contribution_values
+        })
+        explain_df['abs_shap'] = explain_df['shap_value'].abs()
+        explain_df = explain_df.sort_values('abs_shap', ascending=False).reset_index(drop=True)
+
+        raw_output = float(base_value + explain_df['shap_value'].sum())
+        return {
+            'explain_df': explain_df,
+            'base_value': float(base_value),
+            'raw_output': raw_output
+        }, None
+    except Exception as exc:
+        return None, f"SHAP explanation failed: {exc}"
+
 # ============================================================================
 # MAIN APP
 # ============================================================================
@@ -115,9 +277,8 @@ def main():
         [
             "Dashboard",
             "Single Prediction",
-            "Batch Predictions",
+            "Upload Analysis",
             "Model Comparison",
-            "Risk Analysis",
             "System Information"
         ]
     )
@@ -134,12 +295,10 @@ def main():
         show_dashboard(system)
     elif page == "Single Prediction":
         show_single_prediction(system)
-    elif page == "Batch Predictions":
-        show_batch_predictions(system)
+    elif page == "Upload Analysis":
+        show_upload_analysis(system)
     elif page == "Model Comparison":
         show_model_comparison(system)
-    elif page == "Risk Analysis":
-        show_risk_analysis(system)
     elif page == "System Information":
         show_system_info(system)
 
@@ -156,35 +315,40 @@ def show_dashboard(system):
     
     # Get metrics
     eval_results = system.evaluation_results
-    improved_rf = eval_results.get('Improved RF', {})
-    baseline_rf = eval_results.get('Baseline RF', {})
+    best_recall_name, best_recall_metrics = get_best_model(eval_results, 'recall')
+    best_accuracy_name, best_accuracy_metrics = get_best_model(eval_results, 'accuracy')
+    best_f1_name, best_f1_metrics = get_best_model(eval_results, 'f1')
+    baseline_recall = eval_results.get('Baseline RF', {}).get('recall', 0)
+    recall_gain = best_recall_metrics.get('recall', 0) - baseline_recall
     
     with col1:
         st.metric(
             "Best Recall",
-            f"{improved_rf.get('recall', 0):.4f}",
-            f"+{(improved_rf.get('recall', 0) - baseline_rf.get('recall', 0)):.4f}",
+            format_pct(best_recall_metrics.get('recall', 0)),
+            f"{best_recall_name} | {recall_gain * 100:+.1f} pts vs Baseline RF",
             delta_color="inverse"
         )
     
     with col2:
         st.metric(
             "Best Accuracy",
-            f"{baseline_rf.get('accuracy', 0):.4f}",
+            format_pct(best_accuracy_metrics.get('accuracy', 0)),
+            best_accuracy_name,
             delta_color="off"
         )
     
     with col3:
         st.metric(
             "Best F1-Score",
-            f"{improved_rf.get('f1', 0):.4f}",
+            format_pct(best_f1_metrics.get('f1', 0)),
+            best_f1_name,
             delta_color="off"
         )
     
     with col4:
         st.metric(
             "Models Trained",
-            "4️⃣",
+            "4",
             "RF, LR, NB, Baseline"
         )
     
@@ -234,11 +398,11 @@ def show_dashboard(system):
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        st.markdown("""
+        st.markdown(f"""
         <div class="success-box">
         <strong>Best for Bug Detection:</strong><br>
-        Improved Random Forest<br>
-        Recall: 0.4878 (+11.1%)
+        {best_recall_name}<br>
+        Recall: {format_pct(best_recall_metrics.get('recall', 0))}
         </div>
         """, unsafe_allow_html=True)
     
@@ -272,6 +436,7 @@ def show_single_prediction(system):
     
     # Get predictor for Improved RF
     predictor = system.get_prediction_engine('Improved RF')
+    st.caption(f"Saved decision threshold for Improved RF: {predictor.decision_threshold:.3f}")
     
     col1, col2 = st.columns(2)
     
@@ -371,16 +536,68 @@ def show_single_prediction(system):
         }
         
         st.info(risk_descriptions.get(result['risk_level'], ''))
+        st.caption(f"Classification label uses threshold {result['decision_threshold']:.3f}")
+
+        st.markdown("---")
+        st.subheader("SHAP Explainability Panel")
+        st.write("This panel explains how each metric pushed the prediction toward Buggy or Clean.")
+
+        shap_result, shap_error = get_single_sample_shap(system, 'Improved RF', features)
+        if shap_error:
+            st.warning(shap_error)
+        elif shap_result is not None:
+            explain_df = shap_result['explain_df']
+
+            fig_shap = px.bar(
+                explain_df.sort_values('shap_value'),
+                x='shap_value',
+                y='feature',
+                orientation='h',
+                color='shap_value',
+                color_continuous_scale='RdBu_r',
+                title='Feature Contribution to This Prediction (SHAP)',
+                labels={'shap_value': 'SHAP Value (impact on model output)', 'feature': 'Metric'}
+            )
+            fig_shap.add_vline(x=0, line_width=1, line_dash='dash', line_color='gray')
+            st.plotly_chart(fig_shap, use_container_width=True)
+
+            top_positive = explain_df.sort_values('shap_value', ascending=False).head(1).iloc[0]
+            top_negative = explain_df.sort_values('shap_value', ascending=True).head(1).iloc[0]
+
+            col_pos, col_neg, col_base = st.columns(3)
+            with col_pos:
+                st.metric(
+                    "Strongest Push to Buggy",
+                    top_positive['feature'],
+                    f"{top_positive['shap_value']:+.4f}"
+                )
+            with col_neg:
+                st.metric(
+                    "Strongest Push to Clean",
+                    top_negative['feature'],
+                    f"{top_negative['shap_value']:+.4f}"
+                )
+            with col_base:
+                st.metric(
+                    "Explainer Base Value",
+                    f"{shap_result['base_value']:.4f}",
+                    f"Output {shap_result['raw_output']:.4f}"
+                )
+
+            st.dataframe(
+                explain_df[['feature', 'input_value', 'shap_value']],
+                use_container_width=True
+            )
 
 
 # ============================================================================
 # PAGE: BATCH PREDICTIONS
 # ============================================================================
 
-def show_batch_predictions(system):
-    """Batch prediction from CSV upload"""
-    st.header("Batch Module Predictions")
-    st.write("Upload a CSV file with multiple modules to predict bugs")
+def show_upload_analysis(system):
+    """Unified upload analysis page for prediction and risk review."""
+    st.header("Upload Analysis")
+    st.write("Upload a CSV file to analyze modules, predict bug risk, and review risk distribution.")
     
     # Template
     st.subheader("CSV Format Template")
@@ -392,49 +609,106 @@ def show_batch_predictions(system):
     })
     st.dataframe(template_df)
     
-    # File upload
-    uploaded_file = st.file_uploader("Choose CSV file", type="csv")
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        uploaded_file = st.file_uploader("Choose CSV file", type="csv")
+    with col2:
+        st.markdown("**Model Used**")
+        model_choice = st.selectbox(
+            "Choose prediction model",
+            ['Improved RF', 'Logistic Regression', 'Baseline RF', 'Naive Bayes'],
+            index=0,
+            key="upload_model_select"
+        )
+
+    st.info(f"Selected model for upload analysis: {model_choice}")
     
     if uploaded_file is not None:
         # Read file
         df = pd.read_csv(uploaded_file)
-        
-        # Validate columns
-        required_cols = ['LOC', 'CBO', 'RFC', 'WMC']
-        if not all(col in df.columns for col in required_cols):
-            st.error(f"CSV must contain columns: {required_cols}")
+
+        # Extract columns from flexible input schema
+        feature_df, mapping, missing, source_df, valid_rows = prepare_prediction_input(df)
+        if feature_df is None:
+            st.error(
+                "Could not extract all required metrics. "
+                "Please include columns matching LOC, CBO, RFC, and WMC."
+            )
+            if mapping:
+                st.info(f"Detected columns: {mapping}")
+            if missing:
+                st.warning(f"Missing or non-numeric metrics: {missing}")
             return
-        
+
+        st.success(f"Detected metric columns: {mapping}")
+        invalid_count = int((~valid_rows).sum())
+        if invalid_count:
+            st.warning(f"Found {invalid_count} row(s) with missing or non-numeric metric values. They will remain visible and be marked as not analyzed.")
+
         # Get predictor
-        predictor = system.get_prediction_engine('Improved RF')
+        predictor = system.get_prediction_engine(model_choice)
+        st.caption(f"Saved decision threshold for {model_choice}: {predictor.decision_threshold:.3f}")
         
         # Predict
         if st.button("Predict All Modules"):
-            predictions_df = predictor.predict_batch(df[required_cols].values)
-            results_df = pd.concat([df, predictions_df], axis=1)
+            valid_feature_df = feature_df.loc[valid_rows].reset_index(drop=True)
+            predictions_df = predictor.predict_batch(valid_feature_df.values)
+
+            results_df = source_df.copy()
+            for col in ['LOC', 'CBO', 'RFC', 'WMC']:
+                if col not in results_df.columns:
+                    results_df[col] = feature_df[col]
+
+            results_df['analysis_status'] = np.where(valid_rows, 'Analyzed', 'Invalid input')
+            results_df['prediction'] = np.nan
+            results_df['probability'] = np.nan
+            results_df['risk_level'] = np.nan
+            results_df['label'] = np.nan
+            results_df['decision_threshold'] = np.nan
+
+            valid_indices = results_df.index[valid_rows]
+            results_df.loc[valid_indices, ['prediction', 'probability', 'risk_level', 'label', 'decision_threshold']] = predictions_df[['prediction', 'probability', 'risk_level', 'label', 'decision_threshold']].values
             
             # Display results
-            st.subheader("Predictions")
+            st.subheader(f"Module-by-Module Analysis - {model_choice}")
             st.dataframe(results_df, use_container_width=True)
             
             # Risk distribution
             st.subheader("Risk Distribution Summary")
-            risk_counts = results_df['risk_level'].value_counts()
+            analyzed_results = results_df[results_df['analysis_status'] == 'Analyzed']
+            risk_counts = analyzed_results['risk_level'].value_counts()
+            total = len(analyzed_results)
             
             col1, col2, col3 = st.columns(3)
             with col1:
-                st.metric("Low Risk", risk_counts.get('LOW', 0))
+                low_count = risk_counts.get('LOW', 0)
+                low_pct = (low_count / total * 100) if total > 0 else 0
+                st.metric("Low Risk", low_count, f"{low_pct:.1f}%")
             with col2:
-                st.metric("Medium Risk", risk_counts.get('MEDIUM', 0))
+                medium_count = risk_counts.get('MEDIUM', 0)
+                medium_pct = (medium_count / total * 100) if total > 0 else 0
+                st.metric("Medium Risk", medium_count, f"{medium_pct:.1f}%")
             with col3:
-                st.metric("High Risk", risk_counts.get('HIGH', 0))
+                high_count = risk_counts.get('HIGH', 0)
+                high_pct = (high_count / total * 100) if total > 0 else 0
+                st.metric("High Risk", high_count, f"{high_pct:.1f}%")
+
+            st.subheader("High-Risk Modules")
+            high_risk_modules = analyzed_results[analyzed_results['risk_level'] == 'HIGH']
+            if len(high_risk_modules) > 0:
+                st.dataframe(
+                    high_risk_modules[['LOC', 'CBO', 'RFC', 'WMC', 'probability', 'risk_level']],
+                    use_container_width=True
+                )
+            else:
+                st.info("No high-risk modules were found in the analyzed rows.")
             
             # Download button
             csv = results_df.to_csv(index=False)
             st.download_button(
                 "Download predictions as CSV",
                 csv,
-                "predictions.csv",
+                f"predictions_{model_choice.replace(' ', '_')}.csv",
                 "text/csv"
             )
 
@@ -454,14 +728,27 @@ def show_model_comparison(system):
     for model_name, metrics in eval_results.items():
         comparison_data.append({
             'Model': model_name,
-            'Accuracy': metrics.get('accuracy', 0),
-            'Precision': metrics.get('precision', 0),
-            'Recall': metrics.get('recall', 0),
-            'F1-Score': metrics.get('f1', 0),
-            'AUC-ROC': metrics.get('auc_roc', 0)
+            'Accuracy': format_pct(metrics.get('accuracy', 0)),
+            'Precision': format_pct(metrics.get('precision', 0)),
+            'Recall': format_pct(metrics.get('recall', 0)),
+            'F1-Score': format_pct(metrics.get('f1', 0)),
+            'AUC-ROC': format_pct(metrics.get('auc_roc', 0)),
+            'Threshold': format_threshold(metrics.get('decision_threshold')),
+            'Optimized For': metrics.get('threshold_optimized_for', 'N/A')
         })
     
     df_comparison = pd.DataFrame(comparison_data)
+    chart_df = pd.DataFrame([
+        {
+            'Model': model_name,
+            'Accuracy': metrics.get('accuracy', 0) * 100,
+            'Precision': metrics.get('precision', 0) * 100,
+            'Recall': metrics.get('recall', 0) * 100,
+            'F1-Score': metrics.get('f1', 0) * 100,
+            'AUC-ROC': metrics.get('auc_roc', 0) * 100
+        }
+        for model_name, metrics in eval_results.items()
+    ])
     
     # Display table
     st.subheader("Performance Metrics")
@@ -472,20 +759,20 @@ def show_model_comparison(system):
     
     with col1:
         fig = px.bar(
-            df_comparison,
+            chart_df,
             x='Model',
             y=['Accuracy', 'Precision', 'Recall', 'F1-Score'],
-            title='Metric Comparison by Model',
+            title='Metric Comparison by Model (%)',
             barmode='group'
         )
         st.plotly_chart(fig, use_container_width=True)
     
     with col2:
         fig = px.bar(
-            df_comparison,
+            chart_df,
             x='Model',
             y='Recall',
-            title='Recall Comparison (Bug Detection)',
+            title='Recall Comparison (Bug Detection %)',
             color='Recall',
             color_continuous_scale='Reds'
         )
@@ -493,8 +780,8 @@ def show_model_comparison(system):
     
     # Insights
     st.subheader("Recommendations")
-    best_recall = df_comparison.loc[df_comparison['Recall'].idxmax()]
-    best_balanced = df_comparison.loc[df_comparison['F1-Score'].idxmax()]
+    best_recall_name, best_recall_metrics = get_best_model(eval_results, 'recall')
+    best_balanced_name, best_balanced_metrics = get_best_model(eval_results, 'f1')
     
     col1, col2 = st.columns(2)
     
@@ -502,8 +789,8 @@ def show_model_comparison(system):
         st.markdown(f"""
         <div class="success-box">
         <strong>Best for Bug Detection:</strong><br>
-        {best_recall['Model']}<br>
-        Recall: {best_recall['Recall']:.4f}
+        {best_recall_name}<br>
+        Recall: {format_pct(best_recall_metrics.get('recall', 0))}
         </div>
         """, unsafe_allow_html=True)
     
@@ -511,8 +798,8 @@ def show_model_comparison(system):
         st.markdown(f"""
         <div class="metric-box">
         <strong>Most Balanced:</strong><br>
-        {best_balanced['Model']}<br>
-        F1-Score: {best_balanced['F1-Score']:.4f}
+        {best_balanced_name}<br>
+        F1-Score: {format_pct(best_balanced_metrics.get('f1', 0))}
         </div>
         """, unsafe_allow_html=True)
 
@@ -548,9 +835,9 @@ def show_risk_analysis(system):
         for model, metrics in risk_data.items():
             risk_comparison.append({
                 'Model': model,
-                'Low': metrics.get('low', 0),
-                'Medium': metrics.get('medium', 0),
-                'High': metrics.get('high', 0)
+                'Low': get_risk_value(metrics, 'low'),
+                'Medium': get_risk_value(metrics, 'medium'),
+                'High': get_risk_value(metrics, 'high')
             })
         
         df_risk = pd.DataFrame(risk_comparison)
@@ -571,11 +858,17 @@ def show_risk_analysis(system):
             with st.expander(f"📊 {model}"):
                 col1, col2, col3 = st.columns(3)
                 with col1:
-                    st.metric("Low Risk", metrics.get('low', 0), f"{metrics.get('low_pct', 0):.1f}%")
+                    low_value = get_risk_value(metrics, 'low')
+                    low_pct = get_risk_value(metrics, 'low_pct')
+                    st.metric("Low Risk", low_value, f"{low_pct:.1f}%")
                 with col2:
-                    st.metric("Medium Risk", metrics.get('medium', 0), f"{metrics.get('medium_pct', 0):.1f}%")
+                    medium_value = get_risk_value(metrics, 'medium')
+                    medium_pct = get_risk_value(metrics, 'medium_pct')
+                    st.metric("Medium Risk", medium_value, f"{medium_pct:.1f}%")
                 with col3:
-                    st.metric("High Risk", metrics.get('high', 0), f"{metrics.get('high_pct', 0):.1f}%")
+                    high_value = get_risk_value(metrics, 'high')
+                    high_pct = get_risk_value(metrics, 'high_pct')
+                    st.metric("High Risk", high_value, f"{high_pct:.1f}%")
     except:
         st.warning("Dataset-level risk classification report not found")
     
@@ -613,12 +906,24 @@ def show_risk_analysis(system):
         
         # Read file
         df = pd.read_csv(uploaded_file)
-        
-        # Validate columns
-        required_cols = ['LOC', 'CBO', 'RFC', 'WMC']
-        if not all(col in df.columns for col in required_cols):
-            st.error(f"CSV must contain columns: {required_cols}")
+
+        # Extract columns from flexible input schema
+        feature_df, mapping, missing, source_df, valid_rows = prepare_prediction_input(df)
+        if feature_df is None:
+            st.error(
+                "Could not extract all required metrics. "
+                "Please include columns matching LOC, CBO, RFC, and WMC."
+            )
+            if mapping:
+                st.info(f"Detected columns: {mapping}")
+            if missing:
+                st.warning(f"Missing or non-numeric metrics: {missing}")
             return
+
+        st.success(f"Detected metric columns: {mapping}")
+        invalid_count = int((~valid_rows).sum())
+        if invalid_count:
+            st.warning(f"Found {invalid_count} row(s) with missing or non-numeric metric values. They will remain visible and be marked as not analyzed.")
         
         # Get predictor for selected model
         predictor = system.get_prediction_engine(model_choice)
@@ -626,18 +931,33 @@ def show_risk_analysis(system):
         # Predict
         if st.button("Analyze Risk Distribution", key="analyze_risk"):
             with st.spinner("Analyzing risk distribution..."):
-                predictions_df = predictor.predict_batch(df[required_cols].values)
-                results_df = pd.concat([df, predictions_df], axis=1)
+                valid_feature_df = feature_df.loc[valid_rows].reset_index(drop=True)
+                predictions_df = predictor.predict_batch(valid_feature_df.values)
+
+                results_df = source_df.copy()
+                for col in ['LOC', 'CBO', 'RFC', 'WMC']:
+                    if col not in results_df.columns:
+                        results_df[col] = feature_df[col]
+
+                results_df['analysis_status'] = np.where(valid_rows, 'Analyzed', 'Invalid input')
+                results_df['prediction'] = np.nan
+                results_df['probability'] = np.nan
+                results_df['risk_level'] = np.nan
+                results_df['label'] = np.nan
+
+                valid_indices = results_df.index[valid_rows]
+                results_df.loc[valid_indices, ['prediction', 'probability', 'risk_level', 'label']] = predictions_df[['prediction', 'probability', 'risk_level', 'label']].values
                 
                 # Display predictions
-                st.subheader(f"Risk Predictions - {model_choice}")
+                st.subheader(f"Module-by-Module Analysis - {model_choice}")
                 st.dataframe(results_df, use_container_width=True)
                 
                 # Risk distribution for uploaded file
                 st.subheader("Risk Distribution Summary")
                 
-                risk_counts = results_df['risk_level'].value_counts()
-                total = len(results_df)
+                analyzed_results = results_df[results_df['analysis_status'] == 'Analyzed']
+                risk_counts = analyzed_results['risk_level'].value_counts()
+                total = len(analyzed_results)
                 
                 col1, col2, col3 = st.columns(3)
                 with col1:
@@ -678,7 +998,7 @@ def show_risk_analysis(system):
                 st.plotly_chart(fig_pie, use_container_width=True)
                 
                 # High-risk modules highlight
-                high_risk_modules = results_df[results_df['risk_level'] == 'HIGH']
+                high_risk_modules = analyzed_results[analyzed_results['risk_level'] == 'HIGH']
                 if len(high_risk_modules) > 0:
                     st.subheader("⚠️ High-Risk Modules (Priority Testing)")
                     st.dataframe(
@@ -704,6 +1024,9 @@ def show_risk_analysis(system):
 def show_system_info(system):
     """System architecture and information"""
     st.header("System Information")
+    eval_results = system.evaluation_results
+    best_recall_name, best_recall_metrics = get_best_model(eval_results, 'recall')
+    best_accuracy_name, best_accuracy_metrics = get_best_model(eval_results, 'accuracy')
     
     st.subheader("Project Overview")
     st.markdown("""
@@ -757,11 +1080,11 @@ def show_system_info(system):
         st.markdown(f"**{metric}:** {desc}")
     
     st.subheader("Key Results")
-    st.success("""
-    ✓ **Improved Recall:** +11.1% improvement in bug detection
-    ✓ **SMOTE Applied:** Successfully balanced class distribution
-    ✓ **4 Models Trained:** Comprehensive comparison framework
-    ✓ **Risk Categorization:** Actionable risk levels for testing prioritization
+    st.success(f"""
+    ✓ **Best recall model:** {best_recall_name} at {format_pct(best_recall_metrics.get('recall', 0))}
+    ✓ **Best accuracy model:** {best_accuracy_name} at {format_pct(best_accuracy_metrics.get('accuracy', 0))}
+    ✓ **4 models trained:** comparison framework is available
+    ✓ **Risk categorization:** actionable low / medium / high prioritization
     """)
 
 

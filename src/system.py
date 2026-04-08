@@ -41,7 +41,7 @@ import warnings
 
 import numpy as np
 import pandas as pd
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, StratifiedKFold
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
@@ -177,6 +177,8 @@ class DataPreprocessor:
             'X_test': X_test_scaled,
             'y_train': y_train,
             'y_test': y_test,
+            'X_full': X,
+            'y_full': y,
             'scaler': self.scaler,
             'feature_names': ['LOC', 'CBO', 'RFC', 'WMC']
         }
@@ -269,6 +271,20 @@ class ModelTrainer:
         self.logger.info(f"[OK] All models trained: {len(models)} models")
         return models
 
+    def train_model_by_name(self, model_name: str, X_train: np.ndarray, y_train: np.ndarray):
+        """Train one supported model by display name."""
+        trainers = {
+            'Baseline RF': self.train_baseline_rf,
+            'Improved RF': self.train_improved_rf,
+            'Logistic Regression': self.train_logistic_regression,
+            'Naive Bayes': self.train_naive_bayes,
+        }
+
+        if model_name not in trainers:
+            raise ValueError(f"Unsupported model for training: {model_name}")
+
+        return trainers[model_name](X_train, y_train)
+
 
 # ============================================================================
 # MODULE 3: MODEL EVALUATOR
@@ -304,20 +320,109 @@ class ModelEvaluator:
             metrics['auc_roc'] = roc_auc_score(y_true, y_proba)
         
         return metrics
+
+    def tune_decision_threshold(
+        self,
+        y_true: np.ndarray,
+        y_proba: np.ndarray,
+        optimize_for: str = 'f1'
+    ) -> Dict[str, Any]:
+        """
+        Find a probability threshold that improves classification decisions.
+
+        The default objective is F1 to balance recall and precision while still
+        surfacing threshold metadata for downstream consumers.
+        """
+        if y_proba is None:
+            return {
+                'threshold': None,
+                'optimized_for': optimize_for,
+                'metrics': None
+            }
+
+        if optimize_for not in {'accuracy', 'precision', 'recall', 'f1'}:
+            raise ValueError(f"Unsupported optimization metric: {optimize_for}")
+
+        candidate_thresholds = np.unique(np.concatenate([
+            np.linspace(0.05, 0.95, 37),
+            np.round(y_proba, 6),
+            np.array([0.5])
+        ]))
+
+        best_result = None
+        for threshold in candidate_thresholds:
+            y_pred = (y_proba >= threshold).astype(int)
+            metrics = self.evaluate(y_true, y_pred, y_proba)
+            metrics['threshold'] = float(threshold)
+
+            score = (
+                metrics[optimize_for],
+                metrics['recall'],
+                metrics['precision'],
+                -abs(threshold - 0.5)
+            )
+
+            if best_result is None or score > best_result['score']:
+                best_result = {
+                    'threshold': float(threshold),
+                    'optimized_for': optimize_for,
+                    'metrics': metrics,
+                    'score': score
+                }
+
+        return {
+            'threshold': best_result['threshold'],
+            'optimized_for': best_result['optimized_for'],
+            'metrics': best_result['metrics']
+        }
     
-    def evaluate_all_models(self, models: Dict, X_test: np.ndarray, y_test: np.ndarray) -> Dict:
+    def evaluate_all_models(
+        self,
+        models: Dict,
+        X_test: np.ndarray,
+        y_test: np.ndarray,
+        optimize_threshold_for: str = 'f1'
+    ) -> Dict:
         """Evaluate all trained models"""
         self.logger.info("Evaluating all models...")
         
         results = {}
         for model_name, model in models.items():
-            y_pred = model.predict(X_test)
             y_proba = model.predict_proba(X_test)[:, 1] if hasattr(model, 'predict_proba') else None
-            
-            metrics = self.evaluate(y_test, y_pred, y_proba)
+            default_y_pred = model.predict(X_test)
+            default_metrics = self.evaluate(y_test, default_y_pred, y_proba)
+
+            if y_proba is not None:
+                threshold_info = self.tune_decision_threshold(
+                    y_test,
+                    y_proba,
+                    optimize_for=optimize_threshold_for
+                )
+                metrics = dict(threshold_info['metrics'])
+                metrics['default_metrics'] = default_metrics
+                metrics['default_threshold'] = 0.5
+                metrics['decision_threshold'] = threshold_info['threshold']
+                metrics['threshold_optimized_for'] = threshold_info['optimized_for']
+                metrics['threshold_gain'] = {
+                    key: metrics[key] - default_metrics[key]
+                    for key in ['accuracy', 'precision', 'recall', 'f1']
+                }
+            else:
+                metrics = dict(default_metrics)
+                metrics['default_metrics'] = dict(default_metrics)
+                metrics['default_threshold'] = None
+                metrics['decision_threshold'] = None
+                metrics['threshold_optimized_for'] = None
+                metrics['threshold_gain'] = {
+                    key: 0.0 for key in ['accuracy', 'precision', 'recall', 'f1']
+                }
+
             results[model_name] = metrics
             
-            self.logger.info(f"[OK] {model_name}: Accuracy={metrics['accuracy']:.4f}, Recall={metrics['recall']:.4f}")
+            self.logger.info(
+                f"[OK] {model_name}: Accuracy={metrics['accuracy']:.4f}, "
+                f"Recall={metrics['recall']:.4f}, Threshold={metrics['decision_threshold']}"
+            )
         
         return results
 
@@ -386,10 +491,12 @@ class PredictionEngine:
     - Risk classification
     """
     
-    def __init__(self, model, scaler, risk_classifier=None):
+    def __init__(self, model, scaler, risk_classifier=None, decision_threshold=0.5, model_name=None):
         self.model = model
         self.scaler = scaler
         self.risk_classifier = risk_classifier or RiskClassifier()
+        self.decision_threshold = float(decision_threshold) if decision_threshold is not None else 0.5
+        self.model_name = model_name
         self.logger = setup_logger('PredictionEngine')
     
     def predict_single(self, features: np.ndarray) -> Dict:
@@ -402,15 +509,20 @@ class PredictionEngine:
             X = self.scaler.transform(X)
         
         # Predict
-        prediction = self.model.predict(X)[0]
         probability = self.model.predict_proba(X)[0][1] if hasattr(self.model, 'predict_proba') else None
-        risk = self.risk_classifier.classify(probability) if probability else None
+        if probability is not None:
+            prediction = int(probability >= self.decision_threshold)
+            risk = self.risk_classifier.classify(probability)
+        else:
+            prediction = int(self.model.predict(X)[0])
+            risk = None
         
         return {
             'prediction': int(prediction),
-            'probability': float(probability) if probability else None,
+            'probability': float(probability) if probability is not None else None,
             'risk_level': risk,
-            'label': 'Buggy' if prediction == 1 else 'Clean'
+            'label': 'Buggy' if prediction == 1 else 'Clean',
+            'decision_threshold': self.decision_threshold
         }
     
     def predict_batch(self, X: np.ndarray) -> pd.DataFrame:
@@ -419,15 +531,20 @@ class PredictionEngine:
         if self.scaler:
             X = self.scaler.transform(X)
         
-        predictions = self.model.predict(X)
         probabilities = self.model.predict_proba(X)[:, 1] if hasattr(self.model, 'predict_proba') else None
-        risks = self.risk_classifier.classify_batch(probabilities) if probabilities is not None else None
+        if probabilities is not None:
+            predictions = (probabilities >= self.decision_threshold).astype(int)
+            risks = self.risk_classifier.classify_batch(probabilities)
+        else:
+            predictions = self.model.predict(X)
+            risks = None
         
         return pd.DataFrame({
             'prediction': predictions,
             'probability': probabilities,
             'risk_level': risks,
-            'label': ['Buggy' if p == 1 else 'Clean' for p in predictions]
+            'label': ['Buggy' if p == 1 else 'Clean' for p in predictions],
+            'decision_threshold': self.decision_threshold
         })
 
 
@@ -460,6 +577,7 @@ class BugPredictionSystem:
         # Storage
         self.models = {}
         self.evaluation_results = {}
+        self.threshold_metadata = {}
         self.data = {}
         self.scaler = None
     
@@ -481,8 +599,21 @@ class BugPredictionSystem:
         # Step 3: Evaluate models
         print("[3/4] Model Evaluation...")
         self.evaluation_results = self.evaluator.evaluate_all_models(
-            self.models, self.data['X_test'], self.data['y_test']
+            self.models,
+            self.data['X_test'],
+            self.data['y_test'],
+            optimize_threshold_for=self.config.get('threshold_metric', 'f1')
         )
+
+        self.threshold_metadata = {
+            model_name: {
+                'decision_threshold': metrics.get('decision_threshold'),
+                'default_threshold': metrics.get('default_threshold'),
+                'threshold_optimized_for': metrics.get('threshold_optimized_for'),
+                'threshold_gain': metrics.get('threshold_gain', {})
+            }
+            for model_name, metrics in self.evaluation_results.items()
+        }
         
         # Step 4: Risk classification
         print("[4/4] Risk Classification...")
@@ -519,6 +650,9 @@ class BugPredictionSystem:
         # Save evaluation results
         with open(f"{output_dir}/evaluation_results.json", 'w') as f:
             json.dump({k: v for k, v in self.evaluation_results.items()}, f, indent=2, default=str)
+
+        with open(f"{output_dir}/threshold_metadata.json", 'w') as f:
+            json.dump(self.threshold_metadata, f, indent=2, default=str)
         
         self.logger.info(f"[OK] All models saved to {output_dir}/")
     
@@ -534,6 +668,12 @@ class BugPredictionSystem:
                 self.scaler = pickle.load(f)
         except:
             pass
+
+        try:
+            with open(f"{model_dir}/threshold_metadata.json", 'r') as f:
+                self.threshold_metadata = json.load(f)
+        except:
+            pass
         
         return model
     
@@ -545,7 +685,9 @@ class BugPredictionSystem:
         return PredictionEngine(
             model=self.models[model_name],
             scaler=self.scaler,
-            risk_classifier=self.risk_classifier
+            risk_classifier=self.risk_classifier,
+            decision_threshold=self.threshold_metadata.get(model_name, {}).get('decision_threshold', 0.5),
+            model_name=model_name
         )
 
 
