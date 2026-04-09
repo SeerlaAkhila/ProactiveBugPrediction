@@ -3,3 +3,13 @@
 [2026-03-26 10:00:15] INFO - [OK] Saved: models/Logistic_Regression.pkl
 [2026-03-26 10:00:15] INFO - [OK] Saved: models/Naive_Bayes.pkl
 [2026-03-26 10:00:15] INFO - [OK] All models saved to models/
+[2026-04-08 15:56:28] INFO - [OK] Loaded: models\Baseline_RF.pkl
+[2026-04-08 15:56:28] INFO - [OK] Loaded: models\Baseline_RF.pkl
+[2026-04-08 15:56:28] INFO - [OK] Loaded: models\Improved_RF.pkl
+[2026-04-08 15:56:28] INFO - [OK] Loaded: models\Improved_RF.pkl
+[2026-04-08 15:56:28] INFO - [OK] Loaded: models\Logistic_Regression.pkl
+[2026-04-08 15:56:28] INFO - [OK] Loaded: models\Logistic_Regression.pkl
+[2026-04-08 15:56:28] INFO - [OK] Loaded: models\Naive_Bayes.pkl
+[2026-04-08 15:56:28] INFO - [OK] Loaded: models\Naive_Bayes.pkl
+[2026-04-08 15:56:28] INFO - [OK] Loaded 4 model(s) from models/
+[2026-04-08 15:56:28] INFO - [OK] Loaded 4 model(s) from models/

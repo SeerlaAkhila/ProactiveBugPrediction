@@ -8,3 +8,13 @@
 [2026-03-26 10:04:26] INFO - [OK] Improved RF: Accuracy=0.8050, Recall=0.4878
 [2026-03-26 10:04:26] INFO - [OK] Logistic Regression: Accuracy=0.8150, Recall=0.5366
 [2026-03-26 10:04:26] INFO - [OK] Naive Bayes: Accuracy=0.8550, Recall=0.4146
+[2026-04-08 15:39:41] INFO - Evaluating all models...
+[2026-04-08 15:39:42] INFO - [OK] Baseline RF: Accuracy=0.8350, Recall=0.5610, Threshold=0.32
+[2026-04-08 15:39:44] INFO - [OK] Improved RF: Accuracy=0.7850, Recall=0.6585, Threshold=0.361327
+[2026-04-08 15:39:45] INFO - [OK] Logistic Regression: Accuracy=0.8600, Recall=0.4634, Threshold=0.657692
+[2026-04-08 15:39:47] INFO - [OK] Naive Bayes: Accuracy=0.8600, Recall=0.4634, Threshold=0.300662
+[2026-04-09 09:08:40] INFO - Evaluating all models...
+[2026-04-09 09:08:42] INFO - [OK] Baseline RF: Accuracy=0.8350, Recall=0.5610, Threshold=0.32
+[2026-04-09 09:08:47] INFO - [OK] Improved RF: Accuracy=0.7850, Recall=0.6585, Threshold=0.361327
+[2026-04-09 09:08:51] INFO - [OK] Logistic Regression: Accuracy=0.8600, Recall=0.4634, Threshold=0.657692
+[2026-04-09 09:08:53] INFO - [OK] Naive Bayes: Accuracy=0.8600, Recall=0.4634, Threshold=0.300662

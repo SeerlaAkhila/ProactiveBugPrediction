@@ -1,19 +1,12 @@
 """
-PHASE 10 & 12: BUG PREDICTION SYSTEM - INTERACTIVE STREAMLIT UI
-================================================================
+Software Bug Prediction System - Interactive Streamlit UI
+=========================================================
 
-Complete functional system with web interface for:
+Web interface for:
 - Input: Software metrics (LOC, CBO, RFC, WMC)
 - Output: Defect prediction, probability, risk level
-- Visualization: Model performance, risk distribution
-- Comparison: Baseline vs Improved model
-
-FEATURES:
-1. Single/Batch Predictions
-2. Model Comparison Dashboard
-3. Risk Analysis & Visualization
-4. Performance Metrics Display
-5. Downloadable Reports
+- Visualization: Model performance and risk distribution
+- Explainability: SHAP per-module contribution analysis
 """
 
 import streamlit as st
@@ -24,6 +17,7 @@ import plotly.express as px
 import pickle
 import json
 import os
+import io
 from pathlib import Path
 try:
     import shap
@@ -167,6 +161,80 @@ def prepare_prediction_input(df):
     )
 
 
+def read_uploaded_dataframe(uploaded_file):
+    """
+    Read an uploaded file into a DataFrame with flexible format detection.
+
+    Supports common table formats directly and falls back to parser probing.
+    """
+    if uploaded_file is None:
+        raise ValueError("No file uploaded.")
+
+    filename = getattr(uploaded_file, "name", "uploaded_file")
+    suffix = Path(filename).suffix.lower()
+    raw_bytes = uploaded_file.getvalue()
+
+    if not raw_bytes:
+        raise ValueError("Uploaded file is empty.")
+
+    attempts = []
+
+    def _run_parser(parser_label, parser_fn):
+        try:
+            parsed_df = parser_fn(io.BytesIO(raw_bytes))
+            if isinstance(parsed_df, list):
+                if not parsed_df:
+                    raise ValueError("No tables found in uploaded file.")
+                parsed_df = parsed_df[0]
+            if not isinstance(parsed_df, pd.DataFrame):
+                raise ValueError("Unsupported parsed data structure.")
+            if parsed_df.empty:
+                raise ValueError("Parsed file contains no rows.")
+            return parsed_df, parser_label
+        except Exception as exc:
+            attempts.append(f"{parser_label}: {exc}")
+            return None, None
+
+    preferred_parsers = {
+        ".csv": [("CSV", lambda b: pd.read_csv(b))],
+        ".tsv": [("TSV", lambda b: pd.read_csv(b, sep="\t"))],
+        ".txt": [("Delimited text", lambda b: pd.read_csv(b, sep=None, engine="python"))],
+        ".json": [("JSON", lambda b: pd.read_json(b))],
+        ".xls": [("Excel", lambda b: pd.read_excel(b))],
+        ".xlsx": [("Excel", lambda b: pd.read_excel(b))],
+        ".ods": [("Excel/ODS", lambda b: pd.read_excel(b))],
+        ".parquet": [("Parquet", lambda b: pd.read_parquet(b))],
+        ".xml": [("XML", lambda b: pd.read_xml(b))],
+        ".html": [("HTML table", lambda b: pd.read_html(b))],
+        ".htm": [("HTML table", lambda b: pd.read_html(b))],
+    }
+
+    fallback_parsers = [
+        ("CSV", lambda b: pd.read_csv(b)),
+        ("Delimited text", lambda b: pd.read_csv(b, sep=None, engine="python")),
+        ("JSON", lambda b: pd.read_json(b)),
+        ("Excel", lambda b: pd.read_excel(b)),
+        ("Parquet", lambda b: pd.read_parquet(b)),
+        ("XML", lambda b: pd.read_xml(b)),
+        ("HTML table", lambda b: pd.read_html(b)),
+    ]
+
+    for label, parser in preferred_parsers.get(suffix, []):
+        df, parser_used = _run_parser(label, parser)
+        if df is not None:
+            return df, parser_used
+
+    for label, parser in fallback_parsers:
+        df, parser_used = _run_parser(label, parser)
+        if df is not None:
+            return df, parser_used
+
+    raise ValueError(
+        "Could not parse this file as tabular data. "
+        "Accepted formats include CSV, TSV/TXT, Excel, JSON, Parquet, XML, and HTML tables."
+    )
+
+
 def get_risk_value(metrics, base_name):
     """Read risk metrics from either legacy or current report schemas."""
     key_variants = {
@@ -261,12 +329,8 @@ def get_single_sample_shap(system, model_name, feature_values):
 
 def main():
     # Header
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        st.markdown("## 🐛 Software Bug Prediction System")
-        st.markdown("Proactive defect detection using Machine Learning")
-    with col2:
-        st.info("📊 Phase 10 & 12 Complete")
+    st.markdown("## 🐛 Software Bug Prediction System")
+    st.markdown("Proactive defect detection using Machine Learning")
     
     st.markdown("---")
     
@@ -584,9 +648,14 @@ def show_single_prediction(system):
                     f"Output {shap_result['raw_output']:.4f}"
                 )
 
-            st.dataframe(
-                explain_df[['feature', 'input_value', 'shap_value']],
-                use_container_width=True
+            # Static rendering avoids jitter/shaking from interactive dataframe scrollbars.
+            st.table(
+                explain_df[['feature', 'input_value', 'shap_value']]
+                .assign(
+                    input_value=lambda df: df['input_value'].map(lambda x: f"{x:.4f}"),
+                    shap_value=lambda df: df['shap_value'].map(lambda x: f"{x:+.4f}")
+                )
+                .set_index('feature')
             )
 
 
@@ -597,10 +666,10 @@ def show_single_prediction(system):
 def show_upload_analysis(system):
     """Unified upload analysis page for prediction and risk review."""
     st.header("Upload Analysis")
-    st.write("Upload a CSV file to analyze modules, predict bug risk, and review risk distribution.")
+    st.write("Upload a data file to analyze modules, predict bug risk, and review risk distribution.")
     
     # Template
-    st.subheader("CSV Format Template")
+    st.subheader("Required Metric Columns")
     template_df = pd.DataFrame({
         'LOC': [150, 200, 100],
         'CBO': [8, 12, 5],
@@ -611,7 +680,7 @@ def show_upload_analysis(system):
     
     col1, col2 = st.columns([2, 1])
     with col1:
-        uploaded_file = st.file_uploader("Choose CSV file", type="csv")
+        uploaded_file = st.file_uploader("Choose input file")
     with col2:
         st.markdown("**Model Used**")
         model_choice = st.selectbox(
@@ -625,7 +694,12 @@ def show_upload_analysis(system):
     
     if uploaded_file is not None:
         # Read file
-        df = pd.read_csv(uploaded_file)
+        try:
+            df, parser_used = read_uploaded_dataframe(uploaded_file)
+            st.caption(f"Loaded file using: {parser_used}")
+        except ValueError as exc:
+            st.error(str(exc))
+            return
 
         # Extract columns from flexible input schema
         feature_df, mapping, missing, source_df, valid_rows = prepare_prediction_input(df)
@@ -752,7 +826,8 @@ def show_model_comparison(system):
     
     # Display table
     st.subheader("Performance Metrics")
-    st.dataframe(df_comparison, use_container_width=True)
+    # Static table avoids UI jitter from dynamic dataframe scroll rendering.
+    st.table(df_comparison.set_index('Model'))
     
     # Visualizations
     col1, col2 = st.columns(2)
@@ -876,12 +951,12 @@ def show_risk_analysis(system):
     
     # TAB 2: USER UPLOAD - CUSTOM RISK ANALYSIS
     st.subheader("📁 Custom Risk Analysis (Upload Your Data)")
-    st.write("Upload a CSV file with software metrics to analyze risk distribution for your modules")
+    st.write("Upload a data file with software metrics to analyze risk distribution for your modules")
     
     # Template
     template_cols = st.columns(2)
     with template_cols[0]:
-        st.markdown("**CSV Format Required:**")
+        st.markdown("**Required Metric Columns:**")
         template_df = pd.DataFrame({
             'LOC': [150, 200, 100],
             'CBO': [8, 12, 5],
@@ -899,13 +974,18 @@ def show_risk_analysis(system):
         )
     
     # File upload
-    uploaded_file = st.file_uploader("Upload CSV file", type="csv", key="risk_upload")
+    uploaded_file = st.file_uploader("Upload input file", key="risk_upload")
     
     if uploaded_file is not None:
         st.markdown("---")
         
         # Read file
-        df = pd.read_csv(uploaded_file)
+        try:
+            df, parser_used = read_uploaded_dataframe(uploaded_file)
+            st.caption(f"Loaded file using: {parser_used}")
+        except ValueError as exc:
+            st.error(str(exc))
+            return
 
         # Extract columns from flexible input schema
         feature_df, mapping, missing, source_df, valid_rows = prepare_prediction_input(df)
@@ -1032,13 +1112,12 @@ def show_system_info(system):
     st.markdown("""
     **Proactive Bug Prediction System** - Identifies bug-prone software modules using ML
     
-    ### Architecture
-    - **Phase 6:** Model Comparison (4 models trained & evaluated)
-    - **Phase 7:** Visualization (7 comprehensive charts)
-    - **Phase 8:** Risk Classification (3-level risk system)
-    - **Phase 9:** Modular System Design (Production-ready architecture)
-    - **Phase 10:** Functional System (Complete integrated solution)
-    - **Phase 12:** Streamlit UI (This interactive web application)
+    ### Core Capabilities
+    - Multi-model bug prediction (Baseline RF, Improved RF, Logistic Regression, Naive Bayes)
+    - Threshold-tuned classification for better recall/precision control
+    - Single-module prediction with SHAP explainability panel
+    - Batch CSV upload analysis with risk-level triage
+    - Interactive model-comparison and risk-distribution views
     """)
     
     st.subheader("Trained Models")

@@ -9,6 +9,8 @@ A **machine learning-based defect prediction system** that identifies bug-prone 
 - 💰 Reduce maintenance costs
 - 🧪 Optimize testing effort
 - ⚠️ Risk-based testing prioritization
+- 🎚️ Threshold-tuned predictions for better recall/precision balance
+- 🔍 SHAP-based module explainability for root-cause insight
 
 ---
 
@@ -34,7 +36,7 @@ A **machine learning-based defect prediction system** that identifies bug-prone 
 │  ┌──────────────────┐  ┌──────────────────┐               │
 │  │ ModelEvaluator   │  │ RiskClassifier   │               │
 │  │  - Accuracy      │  │  - LOW (0-0.3)   │               │
-│  │  - Recall        │  │  - MEDIUM (0.3-7)│               │
+│  │  - Recall        │  │  - MEDIUM (0.3-0.7)│             │
 │  │  - F1-Score      │  │  - HIGH (0.7-1)  │               │
 │  └──────────────────┘  └──────────────────┘               │
 │                                                             │
@@ -63,19 +65,9 @@ A **machine learning-based defect prediction system** that identifies bug-prone 
 
 ---
 
-## Phase Breakdown
+## Implementation Summary
 
-### ✅ PHASE 1-5: Completed (Baseline)
-- Problem understanding & dataset preparation
-- Data preprocessing & exploratory analysis
-- Baseline Random Forest model (83% accuracy, 57% recall)
-
-### ✅ PHASE 6: Model Comparison
-**Status:** Completed ✓
-
-**Implementation:** `src/model_comparison.py`
-
-**Trained 4 Models:**
+### Trained Models (`src/model_comparison.py`)
 | Model | Accuracy | Precision | Recall | F1-Score | AUC-ROC |
 |-------|----------|-----------|--------|----------|---------|
 | Baseline RF | 0.8450 | 0.6923 | **0.4390** | 0.5373 | 0.7896 |
@@ -83,17 +75,7 @@ A **machine learning-based defect prediction system** that identifies bug-prone 
 | Logistic Regression | 0.8150 | 0.5500 | **0.5366** | 0.5432 | 0.7964 |
 | Naive Bayes | 0.8550 | 0.7727 | **0.4146** | 0.5397 | 0.7574 |
 
-**Key Results:**
-- ✅ Improved RF: +11.1% recall improvement
-- ✅ Best recall: Logistic Regression (0.5366)
-- ✅ SMOTE successfully balanced data (632:632)
-
-### ✅ PHASE 7: Visualization
-**Status:** Completed ✓
-
-**Implementation:** `src/visualization.py`
-
-**Generated 7 Comprehensive Visualizations:**
+### Visualization Outputs (`src/visualization.py`)
 1. `01_metric_comparison.png` - Accuracy, Precision, Recall, F1 comparison
 2. `02_recall_improvement.png` - Bug detection improvement highlight
 3. `03_confusion_matrices.png` - Prediction accuracy for each model
@@ -102,84 +84,19 @@ A **machine learning-based defect prediction system** that identifies bug-prone 
 6. `06_model_rankings.png` - Model ranked by different metrics
 7. `07_baseline_vs_improved.png` - Direct baseline vs improved comparison
 
-### ✅ PHASE 8: Risk Classification
-**Status:** Completed ✓
-
-**Implementation:** `src/risk_classification.py`
-
-**Risk Thresholds:**
+### Risk Classification (`src/risk_classification.py`)
 - 🟢 **LOW RISK (0.0 - 0.3):** Unlikely to have bugs
 - 🟡 **MEDIUM RISK (0.3 - 0.7):** Moderate chance of bugs
 - 🔴 **HIGH RISK (0.7 - 1.0):** Likely to have bugs
 
-**Distribution Example (Improved RF):**
-- Low Risk: 130 modules (65%)
-- Medium Risk: 49 modules (24.5%)
-- High Risk: 21 modules (10.5%)
-
-**Generated Visualizations:**
-- `08a_risk_distribution_counts.png` - Absolute module counts
-- `08b_risk_distribution_pct.png` - Percentage distribution
-- `08c_high_risk_modules.png` - High-risk module detection
-
-### ✅ PHASE 9: System Design
-**Status:** Completed ✓
-
-**Implementation:** `src/system.py`
-
-**Modular Architecture (6 Components):**
-
-1. **DataPreprocessor**
-   - Load and validate datasets
-   - Feature extraction & scaling
-   - Train-test split with stratification
-
-2. **ModelTrainer**
-   - Baseline & Improved Random Forest
-   - Logistic Regression & Naive Bayes
-   - SMOTE for class balancing
-
-3. **ModelEvaluator**
-   - Comprehensive metric calculation
-   - Confusion matrices
-   - ROC-AUC analysis
-
-4. **RiskClassifier**
-   - Probability to risk conversion
-   - Risk distribution analysis
-   - Batch risk classification
-
-5. **PredictionEngine**
-   - Single sample predictions
-   - Batch predictions
-   - Probability estimates
-
-6. **BugPredictionSystem** (Orchestrator)
-   - Coordinate all modules
-   - Complete pipelines
-   - Model persistence (save/load)
-
-### ✅ PHASE 10: Functional System
-**Status:** Completed ✓
-
-**Features:**
-- Complete integrated system
-- All modules working together
-- Model training & evaluation pipeline
-- Batch prediction support
-
-### ✅ PHASE 12: Streamlit UI
-**Status:** Completed ✓
-
-**Implementation:** `app.py`
-
-**Features:**
-- 📊 **Dashboard:** Key metrics & visualizations
-- 🎯 **Single Prediction:** Enter metrics for one module
-- 📁 **Batch Predictions:** Upload CSV, predict multiple modules
-- 📈 **Model Comparison:** Compare all 4 models
-- ⚠️ **Risk Analysis:** Risk distribution & statistics
-- ℹ️ **System Information:** Architecture & documentation
+### Application Features (`app.py`)
+- 📊 **Dashboard:** Key metrics and charts
+- 🎯 **Single Prediction:** One-module prediction with probability + risk level
+- 📁 **Upload Analysis:** Batch CSV prediction and triage
+- 📈 **Model Comparison:** Performance table + charts
+- 🎚️ **Threshold-Aware Inference:** Uses tuned model thresholds
+- 🔍 **SHAP Explainability Panel:** Per-module feature contribution view
+- ℹ️ **System Information:** Project capabilities and dataset details
 
 ---
 
@@ -267,7 +184,8 @@ result = predictor.predict_single([100, 5, 15, 10])
 #   'prediction': 0,  # 0=Clean, 1=Buggy
 #   'probability': 0.1356,  # Defect probability
 #   'risk_level': 'LOW',  # Risk category
-#   'label': 'Clean'
+#   'label': 'Clean',
+#   'decision_threshold': 0.432  # Tuned threshold used for classification
 # }
 
 # Batch prediction
@@ -309,7 +227,9 @@ Proactivebug/
 │   ├── Logistic_Regression.pkl
 │   ├── Naive_Bayes.pkl
 │   ├── scaler.pkl
-│   └── comparison_metrics.json
+│   ├── comparison_metrics.json
+│   ├── evaluation_results.json
+│   └── threshold_metadata.json
 ├── visualizations/                # Generated charts (generated)
 │   ├── 01_metric_comparison.png
 │   ├── 02_recall_improvement.png
@@ -452,6 +372,13 @@ python src/model_comparison.py
 pip install streamlit plotly
 ```
 
+### Issue: SHAP panel shows "library is not installed"
+**Solution:** Install SHAP in the same environment used to run Streamlit
+```bash
+pip install shap
+python -m streamlit run app.py
+```
+
 ---
 
 ## Performance Metrics Explanation
@@ -530,6 +457,7 @@ pip install streamlit plotly
 - imbalanced-learn: SMOTE implementation
 - Streamlit: Web UI
 - Plotly: Interactive visualizations
+- SHAP: Local prediction explainability
 
 ---
 
@@ -539,7 +467,8 @@ For issues, questions, or improvements:
 1. Check existing documentation
 2. Review troubleshooting section
 3. Examine log files in `logs/` directory
-4. Inspect model performance in `models/comparison_metrics.json`
+4. Inspect model performance in `models/evaluation_results.json`
+5. Inspect threshold metadata in `models/threshold_metadata.json`
 
 ---
 
@@ -551,6 +480,6 @@ This project implements defect prediction using the CK metrics dataset.
 
 ---
 
-**Last Updated:** March 26, 2026  
-**Version:** 2.0 (Complete System)  
+**Last Updated:** April 8, 2026  
+**Version:** 2.1 (Threshold + Explainability Update)  
 **Status:** ✅ Production Ready
