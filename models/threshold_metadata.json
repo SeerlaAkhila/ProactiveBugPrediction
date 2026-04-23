@@ -1,0 +1,22 @@
+{
+  "Baseline RF": {
+    "decision_threshold": 0.32,
+    "default_threshold": 0.5,
+    "threshold_optimized_for": "f1"
+  },
+  "Improved RF": {
+    "decision_threshold": 0.361327,
+    "default_threshold": 0.5,
+    "threshold_optimized_for": "f1"
+  },
+  "Logistic Regression": {
+    "decision_threshold": 0.657692,
+    "default_threshold": 0.5,
+    "threshold_optimized_for": "f1"
+  },
+  "Naive Bayes": {
+    "decision_threshold": 0.300662,
+    "default_threshold": 0.5,
+    "threshold_optimized_for": "f1"
+  }
+}

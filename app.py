@@ -44,6 +44,19 @@ st.set_page_config(
 # Custom CSS
 st.markdown("""
     <style>
+    [data-testid="stSidebar"] {
+        min-width: 360px;
+        max-width: 360px;
+    }
+    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] h2 {
+        font-size: 2rem;
+    }
+    [data-testid="stSidebar"] label {
+        font-size: 1.15rem;
+    }
+    [data-testid="stSidebar"] [role="radiogroup"] label p {
+        font-size: 1.2rem;
+    }
     .main-header {
         font-size: 2.5rem;
         color: #1f77b4;
@@ -80,16 +93,156 @@ st.markdown("""
 # SESSION STATE INITIALIZATION
 # ============================================================================
 
+MODEL_NAMES = ['Baseline RF', 'Improved RF', 'Logistic Regression', 'Naive Bayes']
+DEFAULT_FEATURE_NAMES = ['LOC', 'CBO', 'RFC', 'WMC']
+TRAINING_DATA_PATH = Path("data/processed/cleaned_dataset.csv")
+
+
+@st.cache_data
+def load_feature_ranges(data_path=TRAINING_DATA_PATH):
+    """
+    Load per-feature min/max/default values from the training dataset.
+
+    Returns:
+        dict: {
+            'LOC': {'min': 0.0, 'max': 100.0, 'default': 10.0},
+            ...
+        }
+    """
+    try:
+        df = pd.read_csv(data_path, usecols=DEFAULT_FEATURE_NAMES)
+    except Exception as exc:
+        raise RuntimeError(f"Could not load training data from {data_path}: {exc}") from exc
+
+    missing = [col for col in DEFAULT_FEATURE_NAMES if col not in df.columns]
+    if missing:
+        raise RuntimeError(f"Training data is missing required feature columns: {missing}")
+
+    feature_ranges = {}
+    for col in DEFAULT_FEATURE_NAMES:
+        numeric_series = pd.to_numeric(df[col], errors='coerce').dropna()
+        if numeric_series.empty:
+            raise RuntimeError(f"Training feature '{col}' has no numeric values.")
+
+        feature_ranges[col] = {
+            'min': float(numeric_series.min()),
+            'max': float(numeric_series.max()),
+            'default': float(numeric_series.median()),
+        }
+
+    return feature_ranges
+
+
+def _format_range_value(value):
+    """Format range values without noisy trailing decimals."""
+    if float(value).is_integer():
+        return str(int(value))
+    return f"{float(value):.2f}"
+
+
+def validate_single_input(feature_values):
+    """Validate numeric sanity for single-sample input."""
+    values = np.asarray(feature_values, dtype=float)
+    if values.shape != (4,):
+        return False, "Input must include exactly 4 features: LOC, CBO, RFC, WMC."
+    if not np.all(np.isfinite(values)):
+        return False, "Input contains invalid or non-finite values."
+    if np.any(values < 0):
+        return False, "Input metrics cannot be negative."
+    return True, None
+
+
+def load_system_from_saved_artifacts(system, model_dir='models'):
+    """
+    Load trained artifacts from disk into the system instance.
+
+    Returns:
+        (loaded: bool, message: str)
+    """
+    model_dir_path = Path(model_dir)
+    required_files = [
+        model_dir_path / 'Baseline_RF.pkl',
+        model_dir_path / 'Improved_RF.pkl',
+        model_dir_path / 'Logistic_Regression.pkl',
+        model_dir_path / 'Naive_Bayes.pkl',
+        model_dir_path / 'scaler.pkl',
+    ]
+
+    missing_files = [str(path) for path in required_files if not path.exists()]
+    if missing_files:
+        return False, f"Missing saved artifacts: {missing_files}"
+
+    try:
+        system.models = {}
+        for model_name in MODEL_NAMES:
+            model_filename = f"{model_name.replace(' ', '_')}.pkl"
+            with open(model_dir_path / model_filename, 'rb') as f:
+                system.models[model_name] = pickle.load(f)
+
+        with open(model_dir_path / 'scaler.pkl', 'rb') as f:
+            system.scaler = pickle.load(f)
+
+        evaluation_path = model_dir_path / 'evaluation_results.json'
+        comparison_path = model_dir_path / 'comparison_metrics.json'
+        if evaluation_path.exists():
+            with open(evaluation_path, 'r') as f:
+                system.evaluation_results = json.load(f)
+        elif comparison_path.exists():
+            with open(comparison_path, 'r') as f:
+                comparison_metrics = json.load(f)
+            system.evaluation_results = {
+                item['model_name']: {
+                    key: value for key, value in item.items() if key not in {'model_name', 'model_type'}
+                }
+                for item in comparison_metrics
+            }
+        else:
+            return False, "No saved evaluation metrics found in models/."
+
+        threshold_path = model_dir_path / 'threshold_metadata.json'
+        if threshold_path.exists():
+            with open(threshold_path, 'r') as f:
+                system.threshold_metadata = json.load(f)
+        else:
+            system.threshold_metadata = {
+                model_name: {
+                    'decision_threshold': metrics.get('decision_threshold', 0.5),
+                    'default_threshold': metrics.get('default_threshold', 0.5),
+                    'threshold_optimized_for': metrics.get('threshold_optimized_for')
+                }
+                for model_name, metrics in system.evaluation_results.items()
+            }
+            st.warning(
+                "threshold_metadata.json was not found. "
+                "Using default threshold 0.5 for all models until retraining regenerates metadata."
+            )
+
+        feature_ranges = load_feature_ranges(TRAINING_DATA_PATH)
+        system.data = {
+            'feature_names': DEFAULT_FEATURE_NAMES,
+            'feature_ranges': feature_ranges
+        }
+        return True, f"Loaded saved artifacts from '{model_dir_path}'."
+    except Exception as exc:
+        return False, f"Failed to load saved artifacts: {exc}"
+
+
 @st.cache_resource
 def load_system():
     """Load Bug Prediction System"""
     system = BugPredictionSystem()
-    try:
-        system.run_complete_pipeline('data/processed/cleaned_dataset.csv')
+
+    loaded, message = load_system_from_saved_artifacts(system)
+    if loaded:
+        st.success(message)
         return system
-    except Exception as e:
-        st.error(f"Error loading system: {e}")
-        return None
+
+    st.error(
+        "Saved model artifacts could not be loaded. "
+        "Runtime retraining is disabled for production consistency."
+    )
+    st.caption(message)
+    return None
 
 
 METRIC_ALIASES = {
@@ -342,6 +495,7 @@ def main():
             "Dashboard",
             "Single Prediction",
             "Upload Analysis",
+            "Risk Analysis",
             "Model Comparison",
             "System Information"
         ]
@@ -361,6 +515,8 @@ def main():
         show_single_prediction(system)
     elif page == "Upload Analysis":
         show_upload_analysis(system)
+    elif page == "Risk Analysis":
+        show_risk_analysis(system)
     elif page == "Model Comparison":
         show_model_comparison(system)
     elif page == "System Information":
@@ -497,57 +653,119 @@ def show_single_prediction(system):
     """Single module prediction interface"""
     st.header("Single Module Prediction")
     st.write("Enter software metrics for a single module to predict bug risk")
-    
-    # Get predictor for Improved RF
-    predictor = system.get_prediction_engine('Improved RF')
-    st.caption(f"Saved decision threshold for Improved RF: {predictor.decision_threshold:.3f}")
-    
+
+    selected_model = st.selectbox(
+        "Choose prediction model",
+        ['Logistic Regression', 'Improved RF', 'Baseline RF', 'Naive Bayes'],
+        index=0,
+        key="single_model_select"
+    )
+
+    predictor = system.get_prediction_engine(selected_model)
+    st.caption(f"Saved decision threshold for {selected_model}: {predictor.decision_threshold:.3f}")
+    feature_ranges = system.data.get('feature_ranges', {})
+
     col1, col2 = st.columns(2)
     
     with col1:
+        loc_range = feature_ranges.get('LOC', {'min': 0.0, 'max': 10000.0, 'default': 150.0})
         loc = st.number_input(
             "Lines of Code (LOC)",
-            min_value=0,
-            max_value=10000,
-            value=150,
-            step=10
+            min_value=0.0,
+            value=float(loc_range['default']),
+            step=10.0
+        )
+        st.caption(
+            f"Recommended range: {_format_range_value(loc_range['min'])} to "
+            f"{_format_range_value(loc_range['max'])} (based on training data)"
         )
     
     with col2:
+        cbo_range = feature_ranges.get('CBO', {'min': 0.0, 'max': 100.0, 'default': 8.0})
         cbo = st.number_input(
             "Coupling Between Objects (CBO)",
-            min_value=0,
-            max_value=100,
-            value=8,
-            step=1
+            min_value=0.0,
+            value=float(cbo_range['default']),
+            step=1.0
+        )
+        st.caption(
+            f"Recommended range: {_format_range_value(cbo_range['min'])} to "
+            f"{_format_range_value(cbo_range['max'])} (based on training data)"
         )
     
     col3, col4 = st.columns(2)
     
     with col3:
+        rfc_range = feature_ranges.get('RFC', {'min': 0.0, 'max': 100.0, 'default': 20.0})
         rfc = st.number_input(
             "Response for Class (RFC)",
-            min_value=0,
-            max_value=100,
-            value=20,
-            step=1
+            min_value=0.0,
+            value=float(rfc_range['default']),
+            step=1.0
+        )
+        st.caption(
+            f"Recommended range: {_format_range_value(rfc_range['min'])} to "
+            f"{_format_range_value(rfc_range['max'])} (based on training data)"
         )
     
     with col4:
+        wmc_range = feature_ranges.get('WMC', {'min': 0.0, 'max': 100.0, 'default': 10.0})
         wmc = st.number_input(
             "Weighted Methods per Class (WMC)",
-            min_value=0,
-            max_value=100,
-            value=10,
-            step=1
+            min_value=0.0,
+            value=float(wmc_range['default']),
+            step=1.0
+        )
+        st.caption(
+            f"Recommended range: {_format_range_value(wmc_range['min'])} to "
+            f"{_format_range_value(wmc_range['max'])} (based on training data)"
         )
     
     if st.button("Predict", key="predict_single", use_container_width=True):
-        # Create feature array
-        features = np.array([loc, cbo, rfc, wmc])
-        
-        # Get prediction
-        result = predictor.predict_single(features)
+        feature_map = {'LOC': loc, 'CBO': cbo, 'RFC': rfc, 'WMC': wmc}
+        ordered_features = np.array(
+            [feature_map[name] for name in system.data.get('feature_names', DEFAULT_FEATURE_NAMES)],
+            dtype=float
+        )
+
+        is_valid, validation_error = validate_single_input(ordered_features)
+        if not is_valid:
+            st.error(validation_error)
+            return
+
+        out_of_range_features = []
+        for name in system.data.get('feature_names', DEFAULT_FEATURE_NAMES):
+            if name not in feature_ranges:
+                continue
+            value = float(feature_map[name])
+            min_val = float(feature_ranges[name]['min'])
+            max_val = float(feature_ranges[name]['max'])
+            if value < min_val or value > max_val:
+                out_of_range_features.append(name)
+
+        if out_of_range_features:
+            st.warning("Input exceeds training data range. Prediction may be unreliable.")
+            st.caption(f"Out-of-range metrics: {', '.join(out_of_range_features)}")
+
+        if np.allclose(ordered_features, 0.0):
+            st.warning(
+                "All metrics are zero. This is an edge-case input; "
+                "treat the prediction as low confidence."
+            )
+
+        try:
+            result = predictor.predict_single(ordered_features)
+        except Exception as exc:
+            st.error(f"Prediction failed due to preprocessing/model error: {exc}")
+            return
+
+        if result.get('probability') is None or not np.isfinite(result['probability']):
+            st.error("Model returned an invalid probability. Please verify saved artifacts.")
+            return
+
+        if result.get('out_of_distribution'):
+            for warning_text in result.get('ood_warnings', []):
+                st.warning(warning_text)
         
         # Display results
         st.markdown("---")
@@ -606,57 +824,60 @@ def show_single_prediction(system):
         st.subheader("SHAP Explainability Panel")
         st.write("This panel explains how each metric pushed the prediction toward Buggy or Clean.")
 
-        shap_result, shap_error = get_single_sample_shap(system, 'Improved RF', features)
-        if shap_error:
-            st.warning(shap_error)
-        elif shap_result is not None:
-            explain_df = shap_result['explain_df']
+        if selected_model in {'Improved RF', 'Baseline RF'}:
+            shap_result, shap_error = get_single_sample_shap(system, selected_model, ordered_features)
+            if shap_error:
+                st.warning(shap_error)
+            elif shap_result is not None:
+                explain_df = shap_result['explain_df']
 
-            fig_shap = px.bar(
-                explain_df.sort_values('shap_value'),
-                x='shap_value',
-                y='feature',
-                orientation='h',
-                color='shap_value',
-                color_continuous_scale='RdBu_r',
-                title='Feature Contribution to This Prediction (SHAP)',
-                labels={'shap_value': 'SHAP Value (impact on model output)', 'feature': 'Metric'}
-            )
-            fig_shap.add_vline(x=0, line_width=1, line_dash='dash', line_color='gray')
-            st.plotly_chart(fig_shap, use_container_width=True)
+                fig_shap = px.bar(
+                    explain_df.sort_values('shap_value'),
+                    x='shap_value',
+                    y='feature',
+                    orientation='h',
+                    color='shap_value',
+                    color_continuous_scale='RdBu_r',
+                    title='Feature Contribution to This Prediction (SHAP)',
+                    labels={'shap_value': 'SHAP Value (impact on model output)', 'feature': 'Metric'}
+                )
+                fig_shap.add_vline(x=0, line_width=1, line_dash='dash', line_color='gray')
+                st.plotly_chart(fig_shap, use_container_width=True)
 
-            top_positive = explain_df.sort_values('shap_value', ascending=False).head(1).iloc[0]
-            top_negative = explain_df.sort_values('shap_value', ascending=True).head(1).iloc[0]
+                top_positive = explain_df.sort_values('shap_value', ascending=False).head(1).iloc[0]
+                top_negative = explain_df.sort_values('shap_value', ascending=True).head(1).iloc[0]
 
-            col_pos, col_neg, col_base = st.columns(3)
-            with col_pos:
-                st.metric(
-                    "Strongest Push to Buggy",
-                    top_positive['feature'],
-                    f"{top_positive['shap_value']:+.4f}"
-                )
-            with col_neg:
-                st.metric(
-                    "Strongest Push to Clean",
-                    top_negative['feature'],
-                    f"{top_negative['shap_value']:+.4f}"
-                )
-            with col_base:
-                st.metric(
-                    "Explainer Base Value",
-                    f"{shap_result['base_value']:.4f}",
-                    f"Output {shap_result['raw_output']:.4f}"
-                )
+                col_pos, col_neg, col_base = st.columns(3)
+                with col_pos:
+                    st.metric(
+                        "Strongest Push to Buggy",
+                        top_positive['feature'],
+                        f"{top_positive['shap_value']:+.4f}"
+                    )
+                with col_neg:
+                    st.metric(
+                        "Strongest Push to Clean",
+                        top_negative['feature'],
+                        f"{top_negative['shap_value']:+.4f}"
+                    )
+                with col_base:
+                    st.metric(
+                        "Explainer Base Value",
+                        f"{shap_result['base_value']:.4f}",
+                        f"Output {shap_result['raw_output']:.4f}"
+                    )
 
-            # Static rendering avoids jitter/shaking from interactive dataframe scrollbars.
-            st.table(
-                explain_df[['feature', 'input_value', 'shap_value']]
-                .assign(
-                    input_value=lambda df: df['input_value'].map(lambda x: f"{x:.4f}"),
-                    shap_value=lambda df: df['shap_value'].map(lambda x: f"{x:+.4f}")
+                # Static rendering avoids jitter/shaking from interactive dataframe scrollbars.
+                st.table(
+                    explain_df[['feature', 'input_value', 'shap_value']]
+                    .assign(
+                        input_value=lambda df: df['input_value'].map(lambda x: f"{x:.4f}"),
+                        shap_value=lambda df: df['shap_value'].map(lambda x: f"{x:+.4f}")
+                    )
+                    .set_index('feature')
                 )
-                .set_index('feature')
-            )
+        else:
+            st.info("SHAP panel is currently available for Random Forest models. Switch to Improved RF or Baseline RF to view feature-level SHAP contributions.")
 
 
 # ============================================================================
@@ -664,9 +885,9 @@ def show_single_prediction(system):
 # ============================================================================
 
 def show_upload_analysis(system):
-    """Unified upload analysis page for prediction and risk review."""
+    """Upload analysis page focused on batch predictions."""
     st.header("Upload Analysis")
-    st.write("Upload a data file to analyze modules, predict bug risk, and review risk distribution.")
+    st.write("Upload a data file to run batch bug predictions module-by-module.")
     
     # Template
     st.subheader("Required Metric Columns")
@@ -685,7 +906,7 @@ def show_upload_analysis(system):
         st.markdown("**Model Used**")
         model_choice = st.selectbox(
             "Choose prediction model",
-            ['Improved RF', 'Logistic Regression', 'Baseline RF', 'Naive Bayes'],
+            ['Logistic Regression', 'Improved RF', 'Baseline RF', 'Naive Bayes'],
             index=0,
             key="upload_model_select"
         )
@@ -736,46 +957,15 @@ def show_upload_analysis(system):
             results_df['analysis_status'] = np.where(valid_rows, 'Analyzed', 'Invalid input')
             results_df['prediction'] = np.nan
             results_df['probability'] = np.nan
-            results_df['risk_level'] = np.nan
             results_df['label'] = np.nan
             results_df['decision_threshold'] = np.nan
 
             valid_indices = results_df.index[valid_rows]
-            results_df.loc[valid_indices, ['prediction', 'probability', 'risk_level', 'label', 'decision_threshold']] = predictions_df[['prediction', 'probability', 'risk_level', 'label', 'decision_threshold']].values
+            results_df.loc[valid_indices, ['prediction', 'probability', 'label', 'decision_threshold']] = predictions_df[['prediction', 'probability', 'label', 'decision_threshold']].values
             
             # Display results
             st.subheader(f"Module-by-Module Analysis - {model_choice}")
             st.dataframe(results_df, use_container_width=True)
-            
-            # Risk distribution
-            st.subheader("Risk Distribution Summary")
-            analyzed_results = results_df[results_df['analysis_status'] == 'Analyzed']
-            risk_counts = analyzed_results['risk_level'].value_counts()
-            total = len(analyzed_results)
-            
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                low_count = risk_counts.get('LOW', 0)
-                low_pct = (low_count / total * 100) if total > 0 else 0
-                st.metric("Low Risk", low_count, f"{low_pct:.1f}%")
-            with col2:
-                medium_count = risk_counts.get('MEDIUM', 0)
-                medium_pct = (medium_count / total * 100) if total > 0 else 0
-                st.metric("Medium Risk", medium_count, f"{medium_pct:.1f}%")
-            with col3:
-                high_count = risk_counts.get('HIGH', 0)
-                high_pct = (high_count / total * 100) if total > 0 else 0
-                st.metric("High Risk", high_count, f"{high_pct:.1f}%")
-
-            st.subheader("High-Risk Modules")
-            high_risk_modules = analyzed_results[analyzed_results['risk_level'] == 'HIGH']
-            if len(high_risk_modules) > 0:
-                st.dataframe(
-                    high_risk_modules[['LOC', 'CBO', 'RFC', 'WMC', 'probability', 'risk_level']],
-                    use_container_width=True
-                )
-            else:
-                st.info("No high-risk modules were found in the analyzed rows.")
             
             # Download button
             csv = results_df.to_csv(index=False)
@@ -969,7 +1159,7 @@ def show_risk_analysis(system):
         st.markdown("**Select Model for Analysis:**")
         model_choice = st.radio(
             "Choose prediction model",
-            ['Improved RF', 'Logistic Regression', 'Baseline RF', 'Naive Bayes'],
+            ['Logistic Regression', 'Improved RF', 'Baseline RF', 'Naive Bayes'],
             key="risk_model_select"
         )
     

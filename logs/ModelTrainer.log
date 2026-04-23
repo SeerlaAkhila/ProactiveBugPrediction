@@ -75,3 +75,63 @@
 [2026-04-09 09:38:42] INFO -   After: 632 clean, 632 buggy
 [2026-04-09 09:38:42] INFO - [OK] Gaussian Naive Bayes trained
 [2026-04-09 09:38:42] INFO - [OK] All models trained: 4 models
+[2026-04-15 13:14:58] INFO - Starting model training...
+[2026-04-15 13:14:58] INFO - [OK] Baseline Random Forest trained
+[2026-04-15 13:14:58] INFO - [OK] SMOTE applied:
+[2026-04-15 13:14:58] INFO -   Before: 632 clean, 165 buggy
+[2026-04-15 13:14:58] INFO -   After: 632 clean, 632 buggy
+[2026-04-15 13:14:59] INFO - [OK] Improved Random Forest trained
+[2026-04-15 13:14:59] INFO - [OK] SMOTE applied:
+[2026-04-15 13:14:59] INFO -   Before: 632 clean, 165 buggy
+[2026-04-15 13:14:59] INFO -   After: 632 clean, 632 buggy
+[2026-04-15 13:15:02] INFO - [OK] Logistic Regression trained
+[2026-04-15 13:15:02] INFO - [OK] SMOTE applied:
+[2026-04-15 13:15:02] INFO -   Before: 632 clean, 165 buggy
+[2026-04-15 13:15:02] INFO -   After: 632 clean, 632 buggy
+[2026-04-15 13:15:02] INFO - [OK] Gaussian Naive Bayes trained
+[2026-04-15 13:15:02] INFO - [OK] All models trained: 4 models
+[2026-04-15 13:53:52] INFO - Starting model training...
+[2026-04-15 13:53:53] INFO - [OK] Baseline Random Forest trained
+[2026-04-15 13:53:53] INFO - [OK] SMOTE applied:
+[2026-04-15 13:53:53] INFO -   Before: 505 clean, 132 buggy
+[2026-04-15 13:53:53] INFO -   After: 505 clean, 505 buggy
+[2026-04-15 13:53:53] INFO - [OK] Improved Random Forest trained
+[2026-04-15 13:53:53] INFO - [OK] SMOTE applied:
+[2026-04-15 13:53:53] INFO -   Before: 505 clean, 132 buggy
+[2026-04-15 13:53:53] INFO -   After: 505 clean, 505 buggy
+[2026-04-15 13:53:55] INFO - [OK] Logistic Regression trained
+[2026-04-15 13:53:55] INFO - [OK] SMOTE applied:
+[2026-04-15 13:53:55] INFO -   Before: 505 clean, 132 buggy
+[2026-04-15 13:53:55] INFO -   After: 505 clean, 505 buggy
+[2026-04-15 13:53:55] INFO - [OK] Gaussian Naive Bayes trained
+[2026-04-15 13:53:55] INFO - [OK] All models trained: 4 models
+[2026-04-15 13:54:44] INFO - Starting model training...
+[2026-04-15 13:54:44] INFO - [OK] Baseline Random Forest trained
+[2026-04-15 13:54:44] INFO - [OK] SMOTE applied:
+[2026-04-15 13:54:44] INFO -   Before: 505 clean, 132 buggy
+[2026-04-15 13:54:44] INFO -   After: 505 clean, 505 buggy
+[2026-04-15 13:54:45] INFO - [OK] Improved Random Forest trained
+[2026-04-15 13:54:45] INFO - [OK] SMOTE applied:
+[2026-04-15 13:54:45] INFO -   Before: 505 clean, 132 buggy
+[2026-04-15 13:54:45] INFO -   After: 505 clean, 505 buggy
+[2026-04-15 13:54:48] INFO - [OK] Logistic Regression trained
+[2026-04-15 13:54:48] INFO - [OK] SMOTE applied:
+[2026-04-15 13:54:48] INFO -   Before: 505 clean, 132 buggy
+[2026-04-15 13:54:48] INFO -   After: 505 clean, 505 buggy
+[2026-04-15 13:54:48] INFO - [OK] Gaussian Naive Bayes trained
+[2026-04-15 13:54:48] INFO - [OK] All models trained: 4 models
+[2026-04-15 15:38:06] INFO - Starting model training...
+[2026-04-15 15:38:07] INFO - [OK] Baseline Random Forest trained
+[2026-04-15 15:38:07] INFO - [OK] SMOTE applied:
+[2026-04-15 15:38:07] INFO -   Before: 505 clean, 132 buggy
+[2026-04-15 15:38:07] INFO -   After: 505 clean, 505 buggy
+[2026-04-15 15:38:07] INFO - [OK] Improved Random Forest trained
+[2026-04-15 15:38:07] INFO - [OK] SMOTE applied:
+[2026-04-15 15:38:07] INFO -   Before: 505 clean, 132 buggy
+[2026-04-15 15:38:07] INFO -   After: 505 clean, 505 buggy
+[2026-04-15 15:38:14] INFO - [OK] Logistic Regression trained
+[2026-04-15 15:38:14] INFO - [OK] SMOTE applied:
+[2026-04-15 15:38:14] INFO -   Before: 505 clean, 132 buggy
+[2026-04-15 15:38:14] INFO -   After: 505 clean, 505 buggy
+[2026-04-15 15:38:14] INFO - [OK] Gaussian Naive Bayes trained
+[2026-04-15 15:38:14] INFO - [OK] All models trained: 4 models

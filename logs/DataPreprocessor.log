@@ -49,3 +49,35 @@
 [2026-04-09 09:38:38] INFO -   Training: 797 samples
 [2026-04-09 09:38:38] INFO -   Testing: 200 samples
 [2026-04-09 09:38:38] INFO - [OK] Feature scaling completed
+[2026-04-15 13:14:58] INFO - [OK] Dataset loaded: 997 samples, 5 features
+[2026-04-15 13:14:58] INFO - [OK] Data validation passed
+[2026-04-15 13:14:58] INFO - [OK] Features prepared: (997, 4)
+[2026-04-15 13:14:58] INFO -   Class distribution - Clean: 791, Buggy: 206
+[2026-04-15 13:14:58] INFO - [OK] Train-test split completed:
+[2026-04-15 13:14:58] INFO -   Training: 797 samples
+[2026-04-15 13:14:58] INFO -   Testing: 200 samples
+[2026-04-15 13:14:58] INFO - [OK] Feature scaling completed
+[2026-04-15 13:53:52] INFO - [OK] Dataset loaded: 997 samples, 5 features
+[2026-04-15 13:53:52] INFO - [OK] Data validation passed
+[2026-04-15 13:53:52] INFO - [OK] Features prepared: (997, 4)
+[2026-04-15 13:53:52] INFO -   Class distribution - Clean: 791, Buggy: 206
+[2026-04-15 13:53:52] INFO - [OK] Train-val-test split completed:
+[2026-04-15 13:53:52] INFO -   Training: 637 samples
+[2026-04-15 13:53:52] INFO -   Validation: 160 samples
+[2026-04-15 13:53:52] INFO -   Testing: 200 samples
+[2026-04-15 13:54:44] INFO - [OK] Dataset loaded: 997 samples, 5 features
+[2026-04-15 13:54:44] INFO - [OK] Data validation passed
+[2026-04-15 13:54:44] INFO - [OK] Features prepared: (997, 4)
+[2026-04-15 13:54:44] INFO -   Class distribution - Clean: 791, Buggy: 206
+[2026-04-15 13:54:44] INFO - [OK] Train-val-test split completed:
+[2026-04-15 13:54:44] INFO -   Training: 637 samples
+[2026-04-15 13:54:44] INFO -   Validation: 160 samples
+[2026-04-15 13:54:44] INFO -   Testing: 200 samples
+[2026-04-15 15:38:06] INFO - [OK] Dataset loaded: 997 samples, 5 features
+[2026-04-15 15:38:06] INFO - [OK] Data validation passed
+[2026-04-15 15:38:06] INFO - [OK] Features prepared: (997, 4)
+[2026-04-15 15:38:06] INFO -   Class distribution - Clean: 791, Buggy: 206
+[2026-04-15 15:38:06] INFO - [OK] Train-val-test split completed:
+[2026-04-15 15:38:06] INFO -   Training: 637 samples
+[2026-04-15 15:38:06] INFO -   Validation: 160 samples
+[2026-04-15 15:38:06] INFO -   Testing: 200 samples
