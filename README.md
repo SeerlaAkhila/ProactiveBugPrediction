@@ -1,4 +1,7 @@
 # Proactive Software Bug Prediction System
+
+**Live deployment:** https://proactivebugprediction.onrender.com/
+
 ## Overview
 This project predicts whether a software module is likely to be buggy using static code metrics:
 - `LOC` (Lines of Code)
