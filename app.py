@@ -222,9 +222,26 @@ def load_system_from_saved_artifacts(system, model_dir='models'):
             'feature_names': DEFAULT_FEATURE_NAMES,
             'feature_ranges': feature_ranges
         }
+        _verify_loaded_models(system)
         return True, f"Loaded saved artifacts from '{model_dir_path}'."
     except Exception as exc:
         return False, f"Failed to load saved artifacts: {exc}"
+
+
+def _verify_loaded_models(system):
+    """
+    Run a lightweight prediction smoke test to detect model/version incompatibility.
+    """
+    if not system.models or system.scaler is None:
+        raise RuntimeError("Models or scaler are not available for verification.")
+
+    sample = np.array([[10.0, 2.0, 20.0, 5.0]], dtype=float)
+    sample_scaled = system.scaler.transform(sample)
+    for model_name, model in system.models.items():
+        if hasattr(model, "predict_proba"):
+            _ = model.predict_proba(sample_scaled)
+        else:
+            _ = model.predict(sample_scaled)
 
 
 @st.cache_resource
@@ -237,12 +254,25 @@ def load_system():
         st.success(message)
         return system
 
-    st.error(
-        "Saved model artifacts could not be loaded. "
-        "Runtime retraining is disabled for production consistency."
-    )
+    st.warning("Saved model artifacts are incompatible or missing. Attempting local retraining...")
     st.caption(message)
-    return None
+
+    try:
+        if not TRAINING_DATA_PATH.exists():
+            st.error(
+                "Could not retrain because training dataset is missing at "
+                f"'{TRAINING_DATA_PATH}'."
+            )
+            return None
+
+        system.run_complete_pipeline(str(TRAINING_DATA_PATH))
+        system.save_models("models")
+        st.success("Retraining completed and fresh model artifacts were saved to 'models/'.")
+        return system
+    except Exception as retrain_exc:
+        st.error("Automatic retraining failed. Please check logs and installed dependencies.")
+        st.caption(str(retrain_exc))
+        return None
 
 
 METRIC_ALIASES = {

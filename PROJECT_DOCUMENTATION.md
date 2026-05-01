@@ -173,8 +173,7 @@ Each model is scored using:
 - Precision
 - Recall
 - F1-score
-- AUC-ROC
-- Confusion matrix
+
 
 ### 5. Threshold Tuning
 Instead of using a default 0.5 threshold blindly, the system chooses a decision threshold based on validation data to optimize a selected metric, usually F1.
